@@ -16,10 +16,34 @@ extern "C" {
 
 ///////////////////// SCREENS ////////////////////
 #include "screens/ui_Screen1.h"
+#include "screens/ui_Screen2.h"
 
 ///////////////////// VARIABLES ////////////////////
 
 extern const lv_img_dsc_t ui_img_sti_logo_png;
+
+typedef enum {
+
+    SCREEN_GAUGES,
+    SCREEN_BRAKES
+
+} screen_t;
+
+extern screen_t currentScreen;
+
+typedef struct
+{
+    lv_obj_t *rotor;
+    lv_obj_t *label;
+    lv_obj_t *hub;
+} BrakeRotorWidget;
+
+extern BrakeRotorWidget brake_FL;
+extern BrakeRotorWidget brake_FR;
+extern BrakeRotorWidget brake_RL;
+extern BrakeRotorWidget brake_RR;
+
+
 
 // EVENTS
 extern lv_obj_t *ui____initial_actions0;
@@ -27,6 +51,7 @@ extern lv_obj_t *ui____initial_actions0;
 
 LV_IMG_DECLARE( ui_black_boot_png );
 LV_IMG_DECLARE( low_gas_icon_no_bg ); 
+LV_IMG_DECLARE( ui_img_263778233 ); 
 // UI INIT
 void ui_init(void);
 void ui_destroy(void);
