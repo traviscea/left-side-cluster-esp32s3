@@ -16,15 +16,6 @@
 #include <stdint.h>
 #include <math.h>
 
-static lv_color_t green_color;
-static lv_color_t red_color;
-static lv_color_t orange_color;
-static lv_color_t purple_color;
-static lv_color_t pink_color;
-static lv_color_t blue_color;
-
-static bool low_fuel_blink_state = false;
-
 #define UART_PORT      UART_NUM_1
 #define UART_RX_PIN    44
 #define UART_BAUD      2000000
@@ -50,11 +41,11 @@ typedef struct __attribute__((packed)) {
 
 static const float BASE_FUEL_PRESSURE = 43.0;
 
-static int g_water_temp = 100;
+static int g_water_temp = 200;
 static int g_oil_temp = 142;
 static int g_oil_pressure = 2;
 static int g_fuel_pressure = 39;
-static int g_fuel_level = 50.0;
+static int g_fuel_level = 10.0;
 static int g_boost = 0.0;
 
 static uint16_t crc16_ccitt(const uint8_t *data, uint16_t len){
@@ -170,116 +161,21 @@ static void uart_rx_task(void *arg){
 
 
 
-static inline int map_int(int x,
-                          int in_min, int in_max,
-                          int out_min, int out_max)
-{
-    return (x - in_min) * (out_max - out_min)
-           / (in_max - in_min)
-           + out_min;
-}
-
-static inline int constrain_int(int x, int low, int high){
-    if (x < low) return low;
-    if (x > high) return high;
-    return x;
-}
-
-static void init_label_styles(void){
-
-    blue_color = lv_palette_main(LV_PALETTE_CYAN);
-    green_color = lv_color_hex(0x28FF00);
-    red_color = lv_palette_main(LV_PALETTE_PINK);
-    orange_color = lv_palette_main(LV_PALETTE_DEEP_ORANGE);
-    purple_color = lv_palette_main(LV_PALETTE_PURPLE);
-    pink_color = lv_palette_main(LV_PALETTE_PINK);
-}
-
-static void update_label_if_needed(lv_obj_t *label, int new_value, lv_color_t new_color) {
-    if (!label) return;  // safety check
-
-    char buf[12];
-    snprintf(buf, sizeof(buf), "%d", new_value);
-
-    // Only update text if changed
-    const char *old_text = lv_label_get_text(label);
-    if (strcmp(old_text, buf) != 0) {
-        lv_label_set_text(label, buf);
-    }
-
-    // Only update color if changed
-    lv_color_t old_color = lv_obj_get_style_text_color(label, LV_PART_MAIN | LV_STATE_DEFAULT);
-    if (old_color.full != new_color.full) {
-        lv_obj_set_style_text_color(label, new_color, LV_PART_MAIN | LV_STATE_DEFAULT);
-    }
-}
-
 bool isFuelPressureOK() {
     return fabs(g_fuel_pressure - (BASE_FUEL_PRESSURE + g_boost)) <= 4.0;
 }
 
-void update_gauge_values(){
-    lv_color_t water_temp_color = green_color;
-    lv_color_t oil_temp_color = green_color;
-    lv_color_t oil_pressure_color = green_color;
-    lv_color_t fuel_pressure_color = green_color;
-
-
-    fuel_pressure_color = (!isFuelPressureOK() || g_fuel_pressure < 30) ? red_color : green_color;
-    water_temp_color = (g_water_temp < 150) ? blue_color : ((g_water_temp > 205) ? red_color : green_color);
-    oil_temp_color = (g_oil_temp < 150) ? blue_color : ((g_oil_temp > 220) ? red_color : green_color);
-    oil_pressure_color = (g_oil_pressure > 125 || g_oil_pressure < 25) ? red_color : green_color;
-
-    update_label_if_needed(ui_Label5, g_water_temp, water_temp_color);
-    update_label_if_needed(ui_Label6, g_fuel_pressure, fuel_pressure_color);
-    update_label_if_needed(ui_Label7, g_oil_temp, oil_temp_color);
-    update_label_if_needed(ui_Label8, g_oil_pressure, oil_pressure_color);
-
-}
-
-void update_fuel_arc(){
-
-    // Update for fuel gauge color, slows down FPS a little
-    lv_color_t new_color = green_color;
-    new_color = (g_fuel_level < 20) ? red_color : ((g_fuel_level < 35) ? orange_color : green_color) ;
-
-    // Only update color if changed
-    lv_color_t old_color = lv_obj_get_style_arc_color(fuel_arc, LV_PART_INDICATOR);
-    if (old_color.full != new_color.full) {
-        lv_obj_set_style_arc_color(fuel_arc, new_color, LV_PART_INDICATOR);
-    }
-
-    if (g_fuel_level < 15) {
-        //Blinking handled in low_fuel_blink_timer
-    } else if (g_fuel_level < 20) {
-        lv_obj_clear_flag(low_gas_img, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        lv_obj_add_flag(low_gas_img, LV_OBJ_FLAG_HIDDEN);
-    }
-
-    lv_arc_set_value(fuel_arc, g_fuel_level);
-}
-
-void low_fuel_blink_timer(lv_timer_t * t) {
-    if (g_fuel_level >= 15) {
-        return;
-    }
-
-    low_fuel_blink_state = !low_fuel_blink_state;
-
-    if (low_fuel_blink_state) {
-        lv_obj_clear_flag(low_gas_img, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        lv_obj_add_flag(low_gas_img, LV_OBJ_FLAG_HIDDEN);
-    }
-}
-
+// Push the latest UART values into the gauges. Colors, warnings and the
+// low-fuel lamp are handled by the screen (see ui/screens/ui_Screen1.h).
 void gauge_timer(lv_timer_t * t) {
-    update_gauge_values();
+    ui_left_set_coolant(g_water_temp);
+    ui_left_set_oil_pressure(g_oil_pressure);
+    ui_left_set_oil_temp(g_oil_temp);
 }
 
-void arc_timer(lv_timer_t * t){
-    update_fuel_arc();
+// Fuel level sloshes around, so it's only refreshed once a second
+void fuel_timer(lv_timer_t * t){
+    ui_left_set_fuel(g_fuel_level);
 }
 
 
@@ -290,9 +186,14 @@ void app_main(void){
     Touch_Init();
     LVGL_Init();
 
-    init_label_styles();
-    
+    // LVGL isn't thread-safe: hold the lock while building the UI so the
+    // LVGL task can't render at the same time (that crashes at boot).
+    LVGL_Lock(-1);
     ui_init();
+    lv_timer_create(gauge_timer, 100, NULL);
+    lv_timer_create(fuel_timer, 1000, NULL);
+    ui_left_set_fuel(g_fuel_level);
+    LVGL_Unlock();
 
     uart_init();
 
@@ -304,10 +205,6 @@ void app_main(void){
         10,
         NULL
     );
-
-    lv_timer_create(gauge_timer, 100, NULL);
-    lv_timer_create(arc_timer, 1000, NULL);
-    lv_timer_create(low_fuel_blink_timer, 400, NULL);
 
     Set_Backlight(0); 
     vTaskDelay(pdMS_TO_TICKS(750)); 
