@@ -28,6 +28,7 @@
 #define HUB_D       88
 
 LV_FONT_DECLARE(ui_font_letters_36);
+LV_FONT_DECLARE(ui_font_status_20);
 LV_FONT_DECLARE(ui_font_value_66);
 LV_FONT_DECLARE(ui_font_caption_20);
 LV_FONT_DECLARE(ui_font_hub_32);
@@ -46,9 +47,11 @@ static gauge_t fuel_g = { .pivot_x = -PIVOT_X };
 static gauge_t cool_g = { .pivot_x =  PIVOT_X };
 
 static lv_obj_t *fuel_lamp;
+static lv_obj_t *fuel_icon, *cool_icon;
 static lv_obj_t *oilp_value, *oilt_value;
 static lv_obj_t *fuel_hub_value, *cool_hub_value;
 static lv_img_dsc_t *dial_snapshot = NULL;
+static lv_obj_t *dial_obj = NULL;         // the face: snapshot image or live widgets
 
 static int last_fuel = -1, last_cool = -1000, last_oilp = -1000, last_oilt = -1000;
 
@@ -174,7 +177,7 @@ static void draw_stipple(const dctx_t *d, float pivot_x, float ang_from, float a
     lv_draw_rect_dsc_t dot;
     lv_draw_rect_dsc_init(&dot);
     dot.radius = LV_RADIUS_CIRCLE;
-    dot.bg_color = lv_color_hex(UI_COLOR_DIAL);
+    dot.bg_color = lv_color_hex(UI_COLOR_REDLINE);
     dot.bg_opa = LV_OPA_COVER;
     lv_coord_t ds = UI_SCALE(3) < 2 ? 2 : UI_SCALE(3);
 
@@ -444,6 +447,101 @@ static void needle_timer_cb(lv_timer_t *t)
     }
 }
 
+// ---------------------------------------------------------------- restart status
+
+static lv_obj_t *status_label = NULL;
+static lv_timer_t *status_timer = NULL;
+
+static void status_hide_cb(lv_timer_t *t)
+{
+    (void)t;
+    if (status_label) lv_obj_del(status_label);
+    status_label = NULL;
+    status_timer = NULL;          // one-shot timer deletes itself
+}
+
+void ui_show_status(const char *text, uint32_t duration_ms)
+{
+    if (!ui_Screen1) return;
+    if (!status_label) {
+        status_label = lv_label_create(ui_Screen1);
+        lv_obj_set_style_text_font(status_label, &ui_font_status_20, 0);
+        lv_obj_set_style_text_color(status_label, lv_color_hex(UI_COLOR_STATUS), 0);
+        lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);
+    }
+    lv_label_set_text(status_label, text);
+    place(status_label, 0, 80);           // centered in the open space under the hubs
+
+    if (status_timer) lv_timer_del(status_timer);
+    status_timer = lv_timer_create(status_hide_cb, duration_ms, NULL);
+    lv_timer_set_repeat_count(status_timer, 1);
+}
+
+static void recolor_live_parts(void)
+{
+    // The two gauge icons are live images tinted with the face color
+    if (fuel_icon) lv_obj_set_style_img_recolor(fuel_icon, lv_color_hex(UI_COLOR_DIAL), 0);
+    if (cool_icon) lv_obj_set_style_img_recolor(cool_icon, lv_color_hex(UI_COLOR_DIAL), 0);
+}
+
+// ---------------------------------------------------------------- color themes
+
+// Must be the same list, in the same order, on all three screens.
+const ui_theme_t ui_themes[UI_THEME_COUNT] = {
+    { "RED",    0xFF2A0A, 0xE6260A },
+    { "WHITE",  0xFFFFFF, 0xD6DEE6 },
+    { "GREEN",  0x00FF55, 0x00D648 },
+    { "BLUE",   0x00AAFF, 0x0090DD },
+    { "PURPLE", 0xD24DFF, 0xB43FDD },
+    { "AMBER",  0xFFB300, 0xE69E00 },
+};
+static uint8_t theme_index = 0;
+
+uint32_t ui_theme_dial(void) { return ui_themes[theme_index].dial; }
+uint32_t ui_theme_dim(void)  { return ui_themes[theme_index].dim; }
+uint8_t  ui_get_theme(void)  { return theme_index; }
+
+// Build the static face (ticks, numerals, labels) in the current theme and
+// flatten it into one image. Used at start-up and again on a theme change, when
+// the new face replaces the old one in place behind everything else.
+static void install_static_dial(void)
+{
+#if LV_USE_SNAPSHOT && UI_DIAL_USE_SNAPSHOT
+    // Free the old face first so only one full-screen image is in memory at once.
+    // (Nothing is drawn in between: this all runs under the LVGL lock.)
+    if (dial_snapshot) {
+        if (dial_obj) { lv_obj_del(dial_obj); dial_obj = NULL; }
+        lv_img_cache_invalidate_src(dial_snapshot);
+        lv_snapshot_free(dial_snapshot);
+        dial_snapshot = NULL;
+    }
+#endif
+    lv_obj_t *dial = build_static_dial(ui_Screen1);
+    lv_obj_update_layout(ui_Screen1);
+#if LV_USE_SNAPSHOT && UI_DIAL_USE_SNAPSHOT
+    dial_snapshot = lv_snapshot_take(dial, LV_IMG_CF_TRUE_COLOR);
+    if (dial_snapshot) {
+        lv_obj_del(dial);
+        dial = lv_img_create(ui_Screen1);
+        lv_img_set_src(dial, dial_snapshot);
+        lv_obj_center(dial);
+        lv_obj_clear_flag(dial, LV_OBJ_FLAG_CLICKABLE);
+    }
+#endif
+    if (dial_obj) lv_obj_del(dial_obj);       // old live face (snapshot off/failed)
+    dial_obj = dial;
+    lv_obj_move_background(dial_obj);
+}
+
+void ui_set_theme(uint8_t index)
+{
+    if (index >= UI_THEME_COUNT || index == theme_index) return;
+    theme_index = index;
+    if (!ui_Screen1) return;                  // not built yet: the first build uses it
+    install_static_dial();
+    recolor_live_parts();
+}
+
 void ui_Screen1_screen_init(void)
 {
     ui_Screen1 = lv_obj_create(NULL);
@@ -451,25 +549,15 @@ void ui_Screen1_screen_init(void)
     lv_obj_set_style_bg_color(ui_Screen1, lv_color_hex(0x0B0B0B), 0);
     lv_obj_set_style_bg_opa(ui_Screen1, LV_OPA_COVER, 0);
 
-    lv_obj_t *dial = build_static_dial(ui_Screen1);
-    lv_obj_update_layout(ui_Screen1);
-#if LV_USE_SNAPSHOT && UI_DIAL_USE_SNAPSHOT
-    dial_snapshot = lv_snapshot_take(dial, LV_IMG_CF_TRUE_COLOR);
-    if (dial_snapshot) {
-        lv_obj_del(dial);
-        lv_obj_t *img = lv_img_create(ui_Screen1);
-        lv_img_set_src(img, dial_snapshot);
-        lv_obj_center(img);
-        lv_obj_clear_flag(img, LV_OBJ_FLAG_CLICKABLE);
-    }
-#endif
+    dial_obj = NULL;
+    install_static_dial();
 
     // Icons (always dial red)
     float x, y;
     arc_point(fuel_angle(50), 178, &x, &y);
-    make_icon(ui_Screen1, &ui_icon_fuel, x, y);
+    fuel_icon = make_icon(ui_Screen1, &ui_icon_fuel, x, y);
     arc_point(cool_angle(50), 178, &x, &y);
-    make_icon(ui_Screen1, &ui_icon_coolant, x, y);
+    cool_icon = make_icon(ui_Screen1, &ui_icon_coolant, x, y);
 
     // Low-fuel lamp just below the E, like the stock warning light
     fuel_lamp = lv_obj_create(ui_Screen1);
@@ -509,6 +597,9 @@ void ui_Screen1_screen_init(void)
 
 void ui_Screen1_screen_destroy(void)
 {
+    if (status_timer) lv_timer_del(status_timer);
+    status_timer = NULL;
+    status_label = NULL;
     if (needle_timer) lv_timer_del(needle_timer);
     needle_timer = NULL;
     if (ui_Screen1) lv_obj_del(ui_Screen1);
@@ -516,10 +607,12 @@ void ui_Screen1_screen_destroy(void)
     if (dial_snapshot) lv_snapshot_free(dial_snapshot);
 #endif
     dial_snapshot = NULL;
+    dial_obj = NULL;
     ui_Screen1 = NULL;
     fuel_g.needle = fuel_g.glow = cool_g.needle = cool_g.glow = NULL;
     oilp_value = oilt_value = fuel_hub_value = cool_hub_value = NULL;
     fuel_lamp = NULL;
+    fuel_icon = cool_icon = NULL;
     fuel_lamp_on = false;
 }
 
