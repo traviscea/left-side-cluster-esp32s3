@@ -51,6 +51,18 @@ extern "C" {
 #define UI_COOLANT_GLIDE_F_S    15
 #define UI_COOLANT_JUMP_F       40
 
+// ---------------- Startup (like the stock cluster at key-on) ----------------
+// Screen dark until the needles appear and sweep to full scale and back to the
+// live values, then the face fades in. Times are from when the screen is built.
+#define UI_SWEEP_ENABLE      1     // 0 = no sweep
+#define UI_SWEEP_DELAY_MS    1200  // needles appear and start sweeping (same as the center, after its STI badge)
+#define UI_BACKLIGHT_ON_MS   300   // backlight on at this point of the center's startup (with its STI badge)
+#define UI_SWEEP_WAIT_MS     5000  // wait this long for the center's timing; if none comes, sweep on our own
+#define UI_SWEEP_UP_MS       800   // rest -> full scale
+#define UI_SWEEP_HOLD_MS     250   // pause at full scale
+#define UI_SWEEP_DOWN_MS     900   // full scale -> live value
+#define UI_SWEEP_FADE_MS     400   // then the face fades in over this long
+
 
 // ---------------- Face color themes ----------------
 // The face (ticks, numerals, labels, icons) follows the current theme. Needles,
@@ -85,6 +97,15 @@ void ui_left_set_fuel(int percent);        // 0..100
 void ui_left_set_coolant(int deg_f);
 void ui_left_set_oil_pressure(int psi);
 void ui_left_set_oil_temp(int deg_f);
+
+// Called once when it's time to turn the backlight on (a set point in the
+// startup, the same on all three screens). Register before ui_init().
+void ui_set_backlight_cb(void (*cb)(void));
+
+// Line up the startup with the center cluster's: center_ms is how far into its
+// startup the center is right now (from its packets). Call on the LVGL thread.
+// If the center is already past its startup, this one finishes straight away.
+void ui_sweep_sync(uint32_t center_ms);
 
 // Show a short status line at the bottom of the screen, then remove it after
 // duration_ms (used to report an unexpected restart).
