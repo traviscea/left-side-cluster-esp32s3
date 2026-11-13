@@ -11,10 +11,17 @@ idf_component_register(
             "Buzzer/Buzzer.c"                             
             "ui/ui.c"
             "ui/screens/ui_Screen1.c"
+            "ui/fonts/ui_font_status_20.c"
             "ui/fonts/Doto_Extra_Bold_84.c"
             "ui/fonts/Schoolbell_24.c"
             "ui/images/ui_black_boot_png.c"
             "ui/images/low_gas_icon_no_bg.c"
+            "ui/images/ui_icon_fuel.c"
+            "ui/images/ui_icon_coolant.c"
+            "ui/fonts/ui_font_letters_36.c"
+            "ui/fonts/ui_font_value_66.c"
+            "ui/fonts/ui_font_caption_20.c"
+            "ui/fonts/ui_font_hub_32.c"
             "ui/boot/boot_screen.c"
 
       INCLUDE_DIRS 
