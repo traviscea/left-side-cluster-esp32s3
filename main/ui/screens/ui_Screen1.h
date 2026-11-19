@@ -40,6 +40,8 @@ extern "C" {
 // The hub numbers and oil readouts always show the live value; only the
 // needles (and the low-fuel lamp) are smoothed.
 #define UI_NEEDLE_TICK_MS       40   // how often the needles are updated
+#define UI_NEEDLE_MIN_DEG     0.5f   // redraw a needle only once it has moved this far
+#define UI_TEXT_MIN_MS         150   // numbers update at most this often (~7/s; always the newest value)
 
 #define UI_FUEL_SMOOTH_S        20   // fuel averaging time: ignores sloshing
 #define UI_FUEL_DEADBAND_PCT     2   // needle only moves once the average drifts this far

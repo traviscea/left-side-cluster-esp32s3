@@ -53,7 +53,9 @@ static lv_obj_t *fuel_hub_value, *cool_hub_value;
 static lv_img_dsc_t *dial_snapshot = NULL;
 static lv_obj_t *dial_obj = NULL;         // the face: snapshot image or live widgets
 
-static int last_fuel = -1, last_cool = -1000, last_oilp = -1000, last_oilt = -1000;
+static int last_fuel = -1, last_cool = -1000, last_oilp = -1000, last_oilt = -1000;   // shown
+static int now_fuel = -1, now_cool = -1000, now_oilp = -1000, now_oilt = -1000;       // latest
+static uint32_t last_text_ms = 0;
 
 // Damped needle state: target = latest value, avg = smoothed value,
 // shown = where the needle actually is (glides toward avg).
@@ -563,9 +565,44 @@ static void sweep_cb(lv_timer_t *t)
     face_fade_in();
 }
 
+// The numbers show the newest values, but redraw at most every UI_TEXT_MIN_MS:
+// a sensor that flickers by one digit no longer redraws a big number 50 times
+// a second (screen redraws compete with the display refresh for memory).
+static void set_text_int(lv_obj_t *label, int v);
+static void set_color(lv_obj_t *label, uint32_t color);
+static uint32_t band_color(int v, int cold, int hot);
+
+static void show_numbers(void)
+{
+    if (lv_tick_elaps(last_text_ms) < UI_TEXT_MIN_MS) return;
+    last_text_ms = lv_tick_get();
+    if (now_fuel != last_fuel && now_fuel >= 0) {
+        last_fuel = now_fuel;
+        set_text_int(fuel_hub_value, now_fuel);
+        set_color(fuel_hub_value, now_fuel < UI_FUEL_LOW_PCT ? UI_COLOR_HOT : UI_COLOR_VALUE);
+    }
+    if (now_cool != last_cool && now_cool > -1000) {
+        last_cool = now_cool;
+        set_text_int(cool_hub_value, now_cool);
+        set_color(cool_hub_value, band_color(now_cool, UI_COOLANT_COLD_F, UI_COOLANT_HOT_F));
+    }
+    if (now_oilp != last_oilp && now_oilp > -1000) {
+        last_oilp = now_oilp;
+        set_text_int(oilp_value, now_oilp);
+        set_color(oilp_value, now_oilp < UI_OIL_PRESS_LOW_PSI  ? UI_COLOR_HOT :
+                              now_oilp > UI_OIL_PRESS_HIGH_PSI ? UI_COLOR_COLD : UI_COLOR_VALUE);
+    }
+    if (now_oilt != last_oilt && now_oilt > -1000) {
+        last_oilt = now_oilt;
+        set_text_int(oilt_value, now_oilt);
+        set_color(oilt_value, band_color(now_oilt, UI_OIL_TEMP_COLD_F, UI_OIL_TEMP_HOT_F));
+    }
+}
+
 static void needle_timer_cb(lv_timer_t *t)
 {
     (void)t;
+    show_numbers();
     const float dt = UI_NEEDLE_TICK_MS / 1000.0f;
 
     damp_step(&fuel_d, dt, UI_FUEL_SMOOTH_S, UI_FUEL_DEADBAND_PCT, UI_FUEL_GLIDE_PCT_S, UI_FUEL_JUMP_PCT);
@@ -575,7 +612,7 @@ static void needle_timer_cb(lv_timer_t *t)
     // Only redraw a needle when it has actually moved a visible amount
     if (fuel_d.seeded) {
         float a = fuel_angle(fuel_d.shown);
-        if (fabsf(a - fuel_d.drawn_angle) >= 0.2f) { needle_to(&fuel_g, a); fuel_d.drawn_angle = a; }
+        if (fabsf(a - fuel_d.drawn_angle) >= UI_NEEDLE_MIN_DEG) { needle_to(&fuel_g, a); fuel_d.drawn_angle = a; }
 
         // Low-fuel lamp follows the smoothed level, with a little hysteresis,
         // so sloshing near the threshold doesn't make it flicker
@@ -584,7 +621,7 @@ static void needle_timer_cb(lv_timer_t *t)
     }
     if (cool_d.seeded) {
         float a = cool_angle(cool_pos(cool_d.shown));
-        if (fabsf(a - cool_d.drawn_angle) >= 0.2f) { needle_to(&cool_g, a); cool_d.drawn_angle = a; }
+        if (fabsf(a - cool_d.drawn_angle) >= UI_NEEDLE_MIN_DEG) { needle_to(&cool_g, a); cool_d.drawn_angle = a; }
     }
 }
 
@@ -612,7 +649,19 @@ void ui_show_status(const char *text, uint32_t duration_ms)
         lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);
     }
     lv_label_set_text(status_label, text);
-    place(status_label, 0, 80);           // centered in the open space under the hubs
+    if (strchr(text, '\n')) {
+        // Several lines (crash details): on a dark panel over the hubs, clear
+        // of the oil readouts
+        lv_obj_set_style_bg_color(status_label, lv_color_hex(0x000000), 0);
+        lv_obj_set_style_bg_opa(status_label, LV_OPA_90, 0);
+        lv_obj_set_style_pad_all(status_label, 6, 0);
+        lv_obj_set_style_radius(status_label, 8, 0);
+        place(status_label, 0, 30);
+    } else {
+        lv_obj_set_style_bg_opa(status_label, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_pad_all(status_label, 0, 0);
+        place(status_label, 0, 80);       // centered in the open space under the hubs
+    }
 
     if (status_timer) lv_timer_del(status_timer);
     status_timer = lv_timer_create(status_hide_cb, duration_ms, NULL);
@@ -729,6 +778,7 @@ void ui_Screen1_screen_init(void)
     make_hub(ui_Screen1, PIVOT_X, &cool_hub_value);
 
     last_fuel = -1; last_cool = -1000; last_oilp = -1000; last_oilt = -1000;
+    now_fuel = -1; now_cool = -1000; now_oilp = -1000; now_oilt = -1000;
     // Park both needles at the bottom until the first real value arrives
     memset(&fuel_d, 0, sizeof(fuel_d));
     memset(&cool_d, 0, sizeof(cool_d));
@@ -798,35 +848,24 @@ void ui_left_set_fuel(int percent)
     if (!fuel_g.needle) return;
     if (percent < 0) percent = 0;
     if (percent > 100) percent = 100;
-    if (percent == last_fuel) return;
-    last_fuel = percent;
+    if (percent == now_fuel) return;
+    now_fuel = percent;
     seed(&fuel_d, (float)percent);            // needle is damped in needle_timer_cb
-    set_text_int(fuel_hub_value, percent);    // number stays live
-    set_color(fuel_hub_value, percent < UI_FUEL_LOW_PCT ? UI_COLOR_HOT : UI_COLOR_VALUE);
-}
+}                                             // number: show_numbers()
 
 void ui_left_set_coolant(int deg_f)
 {
-    if (!cool_g.needle || deg_f == last_cool) return;
-    last_cool = deg_f;
+    if (!cool_g.needle || deg_f == now_cool) return;
+    now_cool = deg_f;
     seed(&cool_d, (float)deg_f);              // needle is damped in needle_timer_cb
-    set_text_int(cool_hub_value, deg_f);      // number stays live
-    set_color(cool_hub_value, band_color(deg_f, UI_COOLANT_COLD_F, UI_COOLANT_HOT_F));
 }
 
 void ui_left_set_oil_pressure(int psi)
 {
-    if (!oilp_value || psi == last_oilp) return;
-    last_oilp = psi;
-    set_text_int(oilp_value, psi);
-    set_color(oilp_value, psi < UI_OIL_PRESS_LOW_PSI  ? UI_COLOR_HOT :
-                          psi > UI_OIL_PRESS_HIGH_PSI ? UI_COLOR_COLD : UI_COLOR_VALUE);
+    if (oilp_value) now_oilp = psi;
 }
 
 void ui_left_set_oil_temp(int deg_f)
 {
-    if (!oilt_value || deg_f == last_oilt) return;
-    last_oilt = deg_f;
-    set_text_int(oilt_value, deg_f);
-    set_color(oilt_value, band_color(deg_f, UI_OIL_TEMP_COLD_F, UI_OIL_TEMP_HOT_F));
+    if (oilt_value) now_oilt = deg_f;
 }

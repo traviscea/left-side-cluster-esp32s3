@@ -37,6 +37,7 @@ idf_component_register(
 
     REQUIRES
             driver
+            espcoredump
             esp_timer
             esp_lcd
             fatfs
